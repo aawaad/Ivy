@@ -83,10 +83,26 @@ static void CheckError(LPTSTR lpszFunction)
     LocalFree(lpDisplayBuf);
 }
 
-static void Draw(HWND hWnd, s32 x, s32 y, u32 w, u32 h, BYTE alpha = 255)
+static void GetCenteredCoords(HWND hWnd, s32 *x, s32 *y)
 {
-    w = (u32)((r32)w * fabs(scalex));
-    h = (u32)((r32)h * fabs(scaley));
+    RECT rect;
+    GetWindowRect(hWnd, &rect);
+
+    r32 sx = scalex < 0.0f ? -scalex : scalex;
+    r32 sy = scaley < 0.0f ? -scaley : scaley;
+
+    *x = rect.left + ((rect.right - rect.left) / 2) - (s32)((r32)curimg->image->GetWidth() * sx / 2.0f);
+    *y = rect.top + ((rect.bottom - rect.top) / 2) - (s32)((r32)curimg->image->GetHeight() * sy / 2.0f);
+}
+
+static void Draw(HWND hWnd, BYTE alpha = 255)
+{
+    s32 w = (u32)((r32)curimg->image->GetWidth() * fabs(scalex));
+    s32 h = (u32)((r32)curimg->image->GetHeight() * fabs(scaley));
+    u32 actualwh = (u32)sqrt((r32)(w * w) + (r32)(h * h));
+
+    s32 x, y;
+    GetCenteredCoords(hWnd, &x, &y);
 
     HDC hdcScreen = GetDC(NULL);
     HDC hdc = CreateCompatibleDC(hdcScreen);
@@ -94,12 +110,20 @@ static void Draw(HWND hWnd, s32 x, s32 y, u32 w, u32 h, BYTE alpha = 255)
     //Status err = curimg->image->GetHBITMAP(Color(0, 0, 0, 0), &buffer);
     //HBITMAP buffer = CreateCompatibleBitmap(hdc, w, h);
     //HBITMAP oldBmp = (HBITMAP)SelectObject(hdc, buffer);
-    Bitmap bmp(w, h, PixelFormat32bppARGB);
+    //Bitmap bmp(w, h, PixelFormat32bppARGB);
+    Bitmap bmp(actualwh, actualwh, PixelFormat32bppARGB);
 
     //Graphics g(hdc);
     Graphics *g = Graphics::FromImage(&bmp);
     g->Clear(Color(0, 0, 0, 0));
-    g->TranslateTransform((r32)w * 0.5f, (r32)h * 0.5f);
+    if (border || handles)
+    {
+        Pen pen(Color(0, 0, 0), 1);
+        g->DrawRectangle(&pen, 0, 0, actualwh - 1, actualwh - 1);
+        pen.SetColor(Color(255, 255, 255));
+        g->DrawRectangle(&pen, 1, 1, actualwh - 3, actualwh - 3);
+    }
+    g->TranslateTransform((r32)actualwh * 0.5f, (r32)actualwh * 0.5f);
     g->RotateTransform(angle);
     g->TranslateTransform((r32)w * -0.5f, (r32)h * -0.5f);
 
@@ -115,6 +139,7 @@ static void Draw(HWND hWnd, s32 x, s32 y, u32 w, u32 h, BYTE alpha = 255)
         r.Height = -(s32)h;
     }
 
+    g->SetInterpolationMode(InterpolationModeHighQualityBicubic);
     //g->DrawImage(curimg->image, Rect(0, 0, w, h));
     g->DrawImage(curimg->image, r);
     if (border || handles)
@@ -150,13 +175,20 @@ static void Draw(HWND hWnd, s32 x, s32 y, u32 w, u32 h, BYTE alpha = 255)
     bmp.GetHBITMAP(Color(0, 0, 0, 0), &buffer);
     HBITMAP oldBmp = (HBITMAP)SelectObject(hdc, buffer);
 
+#if 0
     POINT pt = {x, y};
     SIZE sz = {w, h};
     POINT ptZero = {0};
+#else
+    POINT pt = {x - (actualwh - w) / 2,
+                y - (actualwh - h) / 2};
+    SIZE sz = {actualwh, actualwh};
+    POINT ptZero = {0};
+#endif
 
     BLENDFUNCTION blend = {AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA};
     UpdateLayeredWindow(hWnd, hdcScreen, &pt, &sz, hdc, &ptZero, RGB(0, 0, 0), &blend, ULW_ALPHA);
-    //CheckError(TEXT("UpdateLayeredWindow"));
+    CheckError(TEXT("UpdateLayeredWindow"));
 
     delete g;
     SelectObject(hdc, oldBmp);
@@ -165,6 +197,7 @@ static void Draw(HWND hWnd, s32 x, s32 y, u32 w, u32 h, BYTE alpha = 255)
     ReleaseDC(NULL, hdcScreen);
 }
 
+#if 0
 static void Draw(HWND hWnd, BYTE alpha = 255)
 {
     RECT rect;
@@ -175,6 +208,7 @@ static void Draw(HWND hWnd, BYTE alpha = 255)
 
     Draw(hWnd, x, y, curimg->image->GetWidth(), curimg->image->GetHeight(), alpha);
 }
+#endif
 
 static void FreeFileList()
 {
@@ -248,40 +282,6 @@ static b32 OpenFiles()
     imglist->image = new Bitmap(fullpath);
     curimg = imglist;
 
-#if 0
-    IFileOpenDialog *fod;
-
-    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL,
-                                  CLSCTX_INPROC_SERVER,
-                                  IID_PPV_ARGS(&fod));
-    if (SUCCEEDED(hr))
-    {
-        DWORD opt;
-        hr = fod->GetOptions(&opt);
-
-        if (SUCCEEDED(hr))
-        {
-            hr = fod->SetOptions(opt | FOS_ALLOWMULTISELECT);
-        }
-
-        if (SUCCEEDED(hr))
-        {
-            hr = fod->Show(NULL);
-
-            if (SUCCEEDED(hr))
-            {
-                IShellItemArray *res;
-                hr = fod->GetResults(&res);
-
-                if (SUCCEEDED(hr))
-                {
-                    int a = 1;
-                }
-            }
-        }
-    }
-#endif
-
     return true;
 }
 
@@ -322,18 +322,6 @@ static void Advance(HWND hWnd, AdvanceDirection dir = Advance_Forwards)
     }
 }
 
-static void GetCenteredCoords(HWND hWnd, s32 *x, s32 *y)
-{
-    RECT rect;
-    GetWindowRect(hWnd, &rect);
-
-    r32 sx = scalex < 0.0f ? -scalex : scalex;
-    r32 sy = scaley < 0.0f ? -scaley : scaley;
-
-    *x = rect.left + ((rect.right - rect.left) / 2) - (s32)((r32)curimg->image->GetWidth() * sx / 2.0f);
-    *y = rect.top + ((rect.bottom - rect.top) / 2) - (s32)((r32)curimg->image->GetHeight() * sy / 2.0f);
-}
-
 #define KEY_SHIFT   (1 << 16)
 #define KEY_CTRL    (1 << 16)
 #define KEY_ALT     (1 << 16)
@@ -359,7 +347,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, u32 uMsg, WPARAM wParam, LPARAM lParam)
                     RECT rect;
                     GetWindowRect(hWnd, &rect);
 
-                    Draw(hWnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+                    //Draw(hWnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+                    Draw(hWnd);
                 } break;
                 case 'O':
                 {
@@ -373,9 +362,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, u32 uMsg, WPARAM wParam, LPARAM lParam)
                     s32 y = rect.top + ((rect.bottom - rect.top) / 2) - (curimg->image->GetHeight() / 2);
                     */
 
-                    s32 x, y;
-                    GetCenteredCoords(hWnd, &x, &y);
-                    Draw(hWnd, x, y, curimg->image->GetWidth(), curimg->image->GetHeight());
+                    //Draw(hWnd, x, y, curimg->image->GetWidth(), curimg->image->GetHeight());
+                    Draw(hWnd);
                 } break;
                 case 'R':
                 {
@@ -392,7 +380,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, u32 uMsg, WPARAM wParam, LPARAM lParam)
 
                     u32 w = curimg->image->GetWidth();
                     u32 h = curimg->image->GetHeight();
-                    Draw(hWnd, (cx / 2) - (w / 2), (cy / 2) - (h / 2), w, h);
+                    MoveWindow(hWnd, (cx / 2) - (w / 2), (cy / 2) - (h / 2), w, h, FALSE);
+                    Draw(hWnd);
+                    //Draw(hWnd, (cx / 2) - (w / 2), (cy / 2) - (h / 2), w, h);
                 } break;
                 case 'D':
                 case VK_RIGHT:
@@ -473,16 +463,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, u32 uMsg, WPARAM wParam, LPARAM lParam)
                 case VK_ADD:
                 {
                     scaley = scalex += 0.1f;
-                    s32 x, y;
-                    GetCenteredCoords(hWnd, &x, &y);
-                    Draw(hWnd, x, y, curimg->image->GetWidth(), curimg->image->GetHeight());
+                    //Draw(hWnd, x, y, curimg->image->GetWidth(), curimg->image->GetHeight());
+                    Draw(hWnd);
                 } break;
                 case VK_SUBTRACT:
                 {
                     scaley = scalex -= 0.1f;
-                    s32 x, y;
-                    GetCenteredCoords(hWnd, &x, &y);
-                    Draw(hWnd, x, y, curimg->image->GetWidth(), curimg->image->GetHeight());
+                    //Draw(hWnd, x, y, curimg->image->GetWidth(), curimg->image->GetHeight());
+                    Draw(hWnd);
                 } break;
                 case VK_ESCAPE:
                 {
@@ -500,7 +488,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, u32 uMsg, WPARAM wParam, LPARAM lParam)
                     if (handles)
                     {
                         handles = false;
-                        dragmode = DragMode_Resize;
+                        //dragmode = DragMode_None;
                         Draw(hWnd);
                     }
                 } break;
@@ -519,6 +507,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, u32 uMsg, WPARAM wParam, LPARAM lParam)
             SetCursor(cursor_sizeall);
 
             GetCursorPos(&curpos);
+            GetCursorPos(&curpos_rel);
             ScreenToClient(hWnd, &curpos_rel);
         } break;
         case WM_MOUSEMOVE:
@@ -558,9 +547,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, u32 uMsg, WPARAM wParam, LPARAM lParam)
                     angle += (a - b);
 
                     char msgbuf[256];
-                    sprintf(msgbuf, "%f %f %f %d %d %d %d\n", angle, a, b, newx, newy, oldx, oldy);
+                    sprintf(msgbuf, "%.3f %.3f %.3f %.3f %d %d %d %d\n", angle, a, b, a - b, newx, newy, oldx, oldy);
                     OutputDebugString(msgbuf);
 
+                    //Draw(hWnd, x, y, curimg->image->GetWidth(), curimg->image->GetHeight());
                     Draw(hWnd);
 
                     curpos_rel = newcurpos;
@@ -588,9 +578,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, u32 uMsg, WPARAM wParam, LPARAM lParam)
                     sprintf(msgbuf, "%f %f %d %d %d %d %d %d\n", scalex, scaley, w, h, xdif, ydif, curpos.x, newcurpos.x);
                     OutputDebugString(msgbuf);
 
-                    //Draw(hWnd);
-                    GetCenteredCoords(hWnd, &x, &y);
-                    Draw(hWnd, x, y, curimg->image->GetWidth(), curimg->image->GetHeight());
+                    //Draw(hWnd, x, y, curimg->image->GetWidth(), curimg->image->GetHeight());
+                    Draw(hWnd);
                 } break;
                 default:
                 {
@@ -670,11 +659,13 @@ s32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     s32 cx = moninfo.rcMonitor.right - moninfo.rcMonitor.left;
     s32 cy = moninfo.rcMonitor.bottom - moninfo.rcMonitor.top;
 
-    Draw(hWnd, (cx / 2) - (w / 2), (cy / 2) - (h / 2), w, h);
+    //Draw(hWnd, (cx / 2) - (w / 2), (cy / 2) - (h / 2), w, h);
     
-    //SetWindowPos(hWnd, NULL, (cx / 2) - (w / 2), (cy / 2) - (h / 2), NULL, NULL, SWP_NOSIZE | SWP_NOZORDER);
+    SetWindowPos(hWnd, NULL, (cx / 2) - (w / 2), (cy / 2) - (h / 2), NULL, NULL, SWP_NOSIZE | SWP_NOZORDER);
     ShowWindow(hWnd, SW_SHOW);
     //UpdateWindow(hWnd);
+
+    Draw(hWnd);
 
     MSG msg;
     HACCEL hAccelTable = LoadAccelerators(hInstance, "IVY");
